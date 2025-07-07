@@ -347,7 +347,7 @@ impl<G: Scope, D: Clone+'static, R: Clone+'static> Collection<G, D, R> {
 
     /// (udf) Brute-force replaces each record with another w/ a new difference type.
     ///
-    pub fn expand<D2, R2, I, L>(&self, mut logic: L) -> Collection<G, D2, R2>
+    pub fn lift<D2, R2, I, L>(&self, mut logic: L) -> Collection<G, D2, R2>
     where
         D2: Data,
         R2: Semigroup + 'static,

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.4](https://github.com/hdz284/differential-dataflow/compare/differential-dataflow-v0.15.3...differential-dataflow-v0.15.4) - 2025-07-07
+
+### Other
+
+- rename lift
+- insert expand
+- Use BTreeMap to avoid sorting ([#615](https://github.com/hdz284/differential-dataflow/pull/615))
+- Respect singleton counts in merge effort ([#614](https://github.com/hdz284/differential-dataflow/pull/614))
+- Demonstrate `Columnar` batch builder ([#602](https://github.com/hdz284/differential-dataflow/pull/602))
+
 ## [0.15.3](https://github.com/TimelyDataflow/differential-dataflow/compare/differential-dataflow-v0.15.2...differential-dataflow-v0.15.3) - 2025-06-24
 
 ### Other

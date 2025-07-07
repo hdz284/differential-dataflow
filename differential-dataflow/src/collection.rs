@@ -345,6 +345,20 @@ impl<G: Scope, D: Clone+'static, R: Clone+'static> Collection<G, D, R> {
             .as_collection()
     }
 
+    /// (udf) Brute-force replaces each record with another w/ a new difference type.
+    ///
+    pub fn expand<D2, R2, I, L>(&self, mut logic: L) -> Collection<G, D2, R2>
+    where
+        D2: Data,
+        R2: Semigroup + 'static,
+        I: IntoIterator<Item = (D2, R2)>,
+        L: FnMut(D) -> I + 'static,
+    {
+        self.inner
+            .flat_map(move |(x, t, _)| logic(x).into_iter().map(move |(x, d2)| (x, t.clone(), d2)))
+            .as_collection()
+    }
+
     /// Joins each record against a collection defined by the function `logic`.
     ///
     /// This method performs what is essentially a join with the collection of records `(x, logic(x))`.

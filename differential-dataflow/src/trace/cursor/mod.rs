@@ -5,32 +5,14 @@
 //! both because it allows navigation on multiple levels (key and val), but also because it
 //! supports efficient seeking (via the `seek_key` and `seek_val` methods).
 
-use timely::progress::Timestamp;
-
-use crate::difference::Semigroup;
-// `pub use` for legacy reasons.
-pub use crate::IntoOwned;
-use crate::lattice::Lattice;
-
 pub mod cursor_list;
 
 pub use self::cursor_list::CursorList;
 
-/// A cursor for navigating ordered `(key, val, time, diff)` updates.
-pub trait Cursor {
+use crate::trace::implementations::LayoutExt;
 
-    /// Key by which updates are indexed.
-    type Key<'a>: Copy + Clone + Ord;
-    /// Values associated with keys.
-    type Val<'a>: Copy + Clone + Ord;
-    /// Timestamps associated with updates
-    type Time: Timestamp + Lattice + Ord + Clone;
-    /// Borrowed form of timestamp.
-    type TimeGat<'a>: Copy + IntoOwned<'a, Owned = Self::Time>;
-    /// Owned form of update difference.
-    type Diff: Semigroup + 'static;
-    /// Borrowed form of update difference.
-    type DiffGat<'a> : Copy + IntoOwned<'a, Owned = Self::Diff>;
+/// A cursor for navigating ordered `(key, val, time, diff)` updates.
+pub trait Cursor : LayoutExt {
 
     /// Storage required by the cursor.
     type Storage;
@@ -74,10 +56,10 @@ pub trait Cursor {
     fn rewind_vals(&mut self, storage: &Self::Storage);
 
     /// Rewinds the cursor and outputs its contents to a Vec
-    fn to_vec<K, V>(&mut self, storage: &Self::Storage) -> Vec<((K, V), Vec<(Self::Time, Self::Diff)>)>
-    where 
-        for<'a> Self::Key<'a> : IntoOwned<'a, Owned = K>,
-        for<'a> Self::Val<'a> : IntoOwned<'a, Owned = V>,
+    fn to_vec<K, IK, V, IV>(&mut self, storage: &Self::Storage, into_key: IK, into_val: IV) -> Vec<((K, V), Vec<(Self::Time, Self::Diff)>)>
+    where
+        IK: for<'a> Fn(Self::Key<'a>) -> K,
+        IV: for<'a> Fn(Self::Val<'a>) -> V,
     {
         let mut out = Vec::new();
         self.rewind_keys(storage);
@@ -86,9 +68,9 @@ pub trait Cursor {
             while let Some(val) = self.get_val(storage) {
                 let mut kv_out = Vec::new();
                 self.map_times(storage, |ts, r| {
-                    kv_out.push((ts.into_owned(), r.into_owned()));
+                    kv_out.push((Self::owned_time(ts), Self::owned_diff(r)));
                 });
-                out.push(((key.into_owned(), val.into_owned()), kv_out));
+                out.push(((into_key(key), into_val(val)), kv_out));
                 self.step_val(storage);
             }
             self.step_key(storage);

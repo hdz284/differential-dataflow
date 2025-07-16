@@ -31,13 +31,17 @@ impl<Tr: TraceReader + Clone> Clone for TraceFrontier<Tr> {
     }
 }
 
+impl<Tr: TraceReader> WithLayout for TraceFrontier<Tr> {
+    type Layout = (
+        <Tr::Layout as Layout>::KeyContainer,
+        <Tr::Layout as Layout>::ValContainer,
+        Vec<Tr::Time>,
+        <Tr::Layout as Layout>::DiffContainer,
+        <Tr::Layout as Layout>::OffsetContainer,
+    );
+}
+
 impl<Tr: TraceReader> TraceReader for TraceFrontier<Tr> {
-    type Key<'a> = Tr::Key<'a>;
-    type Val<'a> = Tr::Val<'a>;
-    type Time = Tr::Time;
-    type TimeGat<'a> = &'a Tr::Time;
-    type Diff = Tr::Diff;
-    type DiffGat<'a> = Tr::DiffGat<'a>;
 
     type Batch = BatchFrontier<Tr::Batch>;
     type Storage = Tr::Storage;
@@ -82,13 +86,17 @@ pub struct BatchFrontier<B: BatchReader> {
     until: Antichain<B::Time>,
 }
 
+impl<B: BatchReader> WithLayout for BatchFrontier<B> {
+    type Layout = (
+        <B::Layout as Layout>::KeyContainer,
+        <B::Layout as Layout>::ValContainer,
+        Vec<B::Time>,
+        <B::Layout as Layout>::DiffContainer,
+        <B::Layout as Layout>::OffsetContainer,
+    );
+}
+
 impl<B: BatchReader> BatchReader for BatchFrontier<B> {
-    type Key<'a> = B::Key<'a>;
-    type Val<'a> = B::Val<'a>;
-    type Time = B::Time;
-    type TimeGat<'a> = &'a B::Time;
-    type Diff = B::Diff;
-    type DiffGat<'a> = B::DiffGat<'a>;
 
     type Cursor = BatchCursorFrontier<B::Cursor>;
 
@@ -117,6 +125,17 @@ pub struct CursorFrontier<C, T> {
     until: Antichain<T>
 }
 
+use crate::trace::implementations::{Layout, WithLayout};
+impl<C: Cursor> WithLayout for CursorFrontier<C, C::Time> {
+    type Layout = (
+        <C::Layout as Layout>::KeyContainer,
+        <C::Layout as Layout>::ValContainer,
+        Vec<C::Time>,
+        <C::Layout as Layout>::DiffContainer,
+        <C::Layout as Layout>::OffsetContainer,
+    );
+}
+
 impl<C, T: Clone> CursorFrontier<C, T> {
     fn new(cursor: C, since: AntichainRef<T>, until: AntichainRef<T>) -> Self {
         CursorFrontier {
@@ -128,12 +147,6 @@ impl<C, T: Clone> CursorFrontier<C, T> {
 }
 
 impl<C: Cursor> Cursor for CursorFrontier<C, C::Time> {
-    type Key<'a> = C::Key<'a>;
-    type Val<'a> = C::Val<'a>;
-    type Time = C::Time;
-    type TimeGat<'a> = &'a C::Time;
-    type Diff = C::Diff;
-    type DiffGat<'a> = C::DiffGat<'a>;
 
     type Storage = C::Storage;
 
@@ -152,8 +165,7 @@ impl<C: Cursor> Cursor for CursorFrontier<C, C::Time> {
         let until = self.until.borrow();
         let mut temp: C::Time = <C::Time as timely::progress::Timestamp>::minimum();
         self.cursor.map_times(storage, |time, diff| {
-            use crate::IntoOwned;
-            time.clone_onto(&mut temp);
+            C::clone_time_onto(time, &mut temp);
             temp.advance_by(since);
             if !until.less_equal(&temp) {
                 logic(&temp, diff);
@@ -180,6 +192,16 @@ pub struct BatchCursorFrontier<C: Cursor> {
     until: Antichain<C::Time>,
 }
 
+impl<C: Cursor> WithLayout for BatchCursorFrontier<C> {
+    type Layout = (
+        <C::Layout as Layout>::KeyContainer,
+        <C::Layout as Layout>::ValContainer,
+        Vec<C::Time>,
+        <C::Layout as Layout>::DiffContainer,
+        <C::Layout as Layout>::OffsetContainer,
+    );
+}
+
 impl<C: Cursor> BatchCursorFrontier<C> {
     fn new(cursor: C, since: AntichainRef<C::Time>, until: AntichainRef<C::Time>) -> Self {
         BatchCursorFrontier {
@@ -191,12 +213,6 @@ impl<C: Cursor> BatchCursorFrontier<C> {
 }
 
 impl<C: Cursor<Storage: BatchReader>> Cursor for BatchCursorFrontier<C> {
-    type Key<'a> = C::Key<'a>;
-    type Val<'a> = C::Val<'a>;
-    type Time = C::Time;
-    type TimeGat<'a> = &'a C::Time;
-    type Diff = C::Diff;
-    type DiffGat<'a> = C::DiffGat<'a>;
 
     type Storage = BatchFrontier<C::Storage>;
 
@@ -215,8 +231,7 @@ impl<C: Cursor<Storage: BatchReader>> Cursor for BatchCursorFrontier<C> {
         let until = self.until.borrow();
         let mut temp: C::Time = <C::Time as timely::progress::Timestamp>::minimum();
         self.cursor.map_times(&storage.batch, |time, diff| {
-            use crate::IntoOwned;
-            time.clone_onto(&mut temp);
+            C::clone_time_onto(time, &mut temp);
             temp.advance_by(since);
             if !until.less_equal(&temp) {
                 logic(&temp, diff);

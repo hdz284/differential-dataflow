@@ -156,15 +156,17 @@ mod container {
     use columnar::bytes::{EncodeDecode, Indexed};
     use columnar::common::IterOwn;
 
+    type BorrowedOf<'a, C> = <<C as Columnar>::Container as columnar::Container>::Borrowed<'a>;
+
     impl<C: Columnar> Column<C> {
-        pub fn borrow(&self) -> <C::Container as columnar::Container<C>>::Borrowed<'_> {
+        pub fn borrow(&self) -> BorrowedOf<C> {
             match self {
                 Column::Typed(t) => t.borrow(),
-                Column::Bytes(b) => <<C::Container as columnar::Container<C>>::Borrowed<'_> as FromBytes>::from_bytes(&mut Indexed::decode(bytemuck::cast_slice(b))),
-                Column::Align(a) => <<C::Container as columnar::Container<C>>::Borrowed<'_> as FromBytes>::from_bytes(&mut Indexed::decode(a)),
+                Column::Bytes(b) => <BorrowedOf<C> as FromBytes>::from_bytes(&mut Indexed::decode(bytemuck::cast_slice(b))),
+                Column::Align(a) => <BorrowedOf<C> as FromBytes>::from_bytes(&mut Indexed::decode(a)),
             }
         }
-        pub fn get(&self, index: usize) -> C::Ref<'_> {
+        pub fn get(&self, index: usize) -> columnar::Ref<C> {
             self.borrow().get(index)
         }
     }
@@ -174,8 +176,8 @@ mod container {
         fn len(&self) -> usize {
             match self {
                 Column::Typed(t) => t.len(),
-                Column::Bytes(b) => <<C::Container as columnar::Container<C>>::Borrowed<'_> as FromBytes>::from_bytes(&mut Indexed::decode(bytemuck::cast_slice(b))).len(),
-                Column::Align(a) => <<C::Container as columnar::Container<C>>::Borrowed<'_> as FromBytes>::from_bytes(&mut Indexed::decode(a)).len(),
+                Column::Bytes(b) => <BorrowedOf<C> as FromBytes>::from_bytes(&mut Indexed::decode(bytemuck::cast_slice(b))).len(),
+                Column::Align(a) => <BorrowedOf<C> as FromBytes>::from_bytes(&mut Indexed::decode(a)).len(),
             }
         }
         // This sets the `Bytes` variant to be an empty `Typed` variant, appropriate for pushing into.
@@ -187,23 +189,23 @@ mod container {
             }
         }
 
-        type ItemRef<'a> = C::Ref<'a>;
-        type Iter<'a> = IterOwn<<C::Container as columnar::Container<C>>::Borrowed<'a>>;
+        type ItemRef<'a> = columnar::Ref<'a, C>;
+        type Iter<'a> = IterOwn<BorrowedOf<'a, C>>;
         fn iter<'a>(&'a self) -> Self::Iter<'a> {
             match self {
                 Column::Typed(t) => t.borrow().into_index_iter(),
-                Column::Bytes(b) => <<C::Container as columnar::Container<C>>::Borrowed<'a> as FromBytes>::from_bytes(&mut Indexed::decode(bytemuck::cast_slice(b))).into_index_iter(),
-                Column::Align(a) => <<C::Container as columnar::Container<C>>::Borrowed<'a> as FromBytes>::from_bytes(&mut Indexed::decode(a)).into_index_iter(),
+                Column::Bytes(b) => <BorrowedOf<C> as FromBytes>::from_bytes(&mut Indexed::decode(bytemuck::cast_slice(b))).into_index_iter(),
+                Column::Align(a) => <BorrowedOf<C> as FromBytes>::from_bytes(&mut Indexed::decode(a)).into_index_iter(),
             }
         }
 
-        type Item<'a> = C::Ref<'a>;
-        type DrainIter<'a> = IterOwn<<C::Container as columnar::Container<C>>::Borrowed<'a>>;
+        type Item<'a> = columnar::Ref<'a, C>;
+        type DrainIter<'a> = IterOwn<BorrowedOf<'a, C>>;
         fn drain<'a>(&'a mut self) -> Self::DrainIter<'a> {
             match self {
                 Column::Typed(t) => t.borrow().into_index_iter(),
-                Column::Bytes(b) => <<C::Container as columnar::Container<C>>::Borrowed<'a> as FromBytes>::from_bytes(&mut Indexed::decode(bytemuck::cast_slice(b))).into_index_iter(),
-                Column::Align(a) => <<C::Container as columnar::Container<C>>::Borrowed<'a> as FromBytes>::from_bytes(&mut Indexed::decode(a)).into_index_iter(),
+                Column::Bytes(b) => <BorrowedOf<C> as FromBytes>::from_bytes(&mut Indexed::decode(bytemuck::cast_slice(b))).into_index_iter(),
+                Column::Align(a) => <BorrowedOf<C> as FromBytes>::from_bytes(&mut Indexed::decode(a)).into_index_iter(),
             }
         }
     }
@@ -406,10 +408,13 @@ pub mod batcher {
 
     impl<'a, D, T, R, C2> PushInto<&'a mut Column<(D, T, R)>> for Chunker<C2>
     where
-        D: for<'b> Columnar<Ref<'b>: Ord>,
-        T: for<'b> Columnar<Ref<'b>: Ord>,
-        R: for<'b> Columnar<Ref<'b>: Ord> + for<'b> Semigroup<R::Ref<'b>>,
-        C2: Container + for<'b, 'c> PushInto<(D::Ref<'b>, T::Ref<'b>, &'c R)>,
+        D: for<'b> Columnar,
+        for<'b> columnar::Ref<'b, D>: Ord,
+        T: for<'b> Columnar,
+        for<'b> columnar::Ref<'b, T>: Ord,
+        R: for<'b> Columnar + for<'b> Semigroup<columnar::Ref<'b, R>>,
+        for<'b> columnar::Ref<'b, R>: Ord,
+        C2: Container + for<'b, 'c> PushInto<(columnar::Ref<'b, D>, columnar::Ref<'b, T>, &'c R)>,
     {
         fn push_into(&mut self, container: &'a mut Column<(D, T, R)>) {
 
@@ -482,11 +487,13 @@ pub mod batcher {
 
         impl<D, T, R> ContainerQueue<Column<(D, T, R)>> for ColumnQueue<(D, T, R)>
         where
-            D: for<'a> Columnar<Ref<'a>: Ord>,
-            T: for<'a> Columnar<Ref<'a>: Ord>,
+            D: for<'a> Columnar,
+            for<'b> columnar::Ref<'b, D>: Ord,
+            T: for<'a> Columnar,
+            for<'b> columnar::Ref<'b, T>: Ord,
             R: Columnar,
         {
-            fn next_or_alloc(&mut self) -> Result<<(D, T, R) as Columnar>::Ref<'_>, Column<(D, T, R)>> {
+            fn next_or_alloc(&mut self) -> Result<columnar::Ref<(D, T, R)>, Column<(D, T, R)>> {
                 if self.is_empty() {
                     Err(std::mem::take(&mut self.list))
                 }
@@ -510,12 +517,12 @@ pub mod batcher {
         }
 
         impl<T: Columnar> ColumnQueue<T> {
-            fn pop(&mut self) -> T::Ref<'_> {
+            fn pop(&mut self) -> columnar::Ref<T> {
                 self.head += 1;
                 self.list.get(self.head - 1)
             }
 
-            fn peek(&self) -> T::Ref<'_> {
+            fn peek(&self) -> columnar::Ref<T> {
                 self.list.get(self.head)
             }
         }
@@ -572,15 +579,12 @@ pub mod dd_builder {
 
     use columnar::Columnar;
 
-    use timely::container::PushInto;
-
-    use differential_dataflow::IntoOwned;
     use differential_dataflow::trace::Builder;
     use differential_dataflow::trace::Description;
     use differential_dataflow::trace::implementations::Layout;
-    use differential_dataflow::trace::implementations::Update;
+    use differential_dataflow::trace::implementations::layout;
     use differential_dataflow::trace::implementations::BatchContainer;
-    use differential_dataflow::trace::implementations::ord_neu::{OrdValBatch, val_batch::OrdValStorage, OrdKeyBatch};
+    use differential_dataflow::trace::implementations::ord_neu::{OrdValBatch, val_batch::OrdValStorage, OrdKeyBatch, Vals, Upds, layers::UpdsBuilder};
     use differential_dataflow::trace::implementations::ord_neu::key_batch::OrdKeyStorage;
     use crate::Column;
 
@@ -597,77 +601,30 @@ pub mod dd_builder {
         ///
         /// This is public to allow container implementors to set and inspect their container.
         pub result: OrdValStorage<L>,
-        singleton: Option<(<L::Target as Update>::Time, <L::Target as Update>::Diff)>,
-        /// Counts the number of singleton optimizations we performed.
-        ///
-        /// This number allows us to correctly gauge the total number of updates reflected in a batch,
-        /// even though `updates.len()` may be much shorter than this amount.
-        singletons: usize,
-    }
-
-    impl<L: Layout> OrdValBuilder<L> {
-        /// Pushes a single update, which may set `self.singleton` rather than push.
-        ///
-        /// This operation is meant to be equivalent to `self.results.updates.push((time, diff))`.
-        /// However, for "clever" reasons it does not do this. Instead, it looks for opportunities
-        /// to encode a singleton update with an "absert" update: repeating the most recent offset.
-        /// This otherwise invalid state encodes "look back one element".
-        ///
-        /// When `self.singleton` is `Some`, it means that we have seen one update and it matched the
-        /// previously pushed update exactly. In that case, we do not push the update into `updates`.
-        /// The update tuple is retained in `self.singleton` in case we see another update and need
-        /// to recover the singleton to push it into `updates` to join the second update.
-        fn push_update(&mut self, time: <L::Target as Update>::Time, diff: <L::Target as Update>::Diff) {
-            // If a just-pushed update exactly equals `(time, diff)` we can avoid pushing it.
-            if self.result.times.last().map(|t| t == <<L::TimeContainer as BatchContainer>::ReadItem<'_> as IntoOwned>::borrow_as(&time)) == Some(true) &&
-                self.result.diffs.last().map(|d| d == <<L::DiffContainer as BatchContainer>::ReadItem<'_> as IntoOwned>::borrow_as(&diff)) == Some(true)
-            {
-                assert!(self.singleton.is_none());
-                self.singleton = Some((time, diff));
-            }
-            else {
-                // If we have pushed a single element, we need to copy it out to meet this one.
-                if let Some((time, diff)) = self.singleton.take() {
-                    self.result.times.push(time);
-                    self.result.diffs.push(diff);
-                }
-                self.result.times.push(time);
-                self.result.diffs.push(diff);
-            }
-        }
+        staging: UpdsBuilder<L::TimeContainer, L::DiffContainer>,
     }
 
     // The layout `L` determines the key, val, time, and diff types.
     impl<L> Builder for OrdValBuilder<L>
     where
         L: Layout,
-        <L::KeyContainer as BatchContainer>::Owned: Columnar,
-        <L::ValContainer as BatchContainer>::Owned: Columnar,
-        <L::TimeContainer as BatchContainer>::Owned: Columnar,
-        <L::DiffContainer as BatchContainer>::Owned: Columnar,
-        // These two constraints seem .. like we could potentially replace by `Columnar::Ref<'a>`.
-        for<'a> L::KeyContainer: PushInto<&'a <L::KeyContainer as BatchContainer>::Owned>,
-        for<'a> L::ValContainer: PushInto<&'a <L::ValContainer as BatchContainer>::Owned>,
-        for<'a> <L::TimeContainer as BatchContainer>::ReadItem<'a> : IntoOwned<'a, Owned = <L::Target as Update>::Time>,
-        for<'a> <L::DiffContainer as BatchContainer>::ReadItem<'a> : IntoOwned<'a, Owned = <L::Target as Update>::Diff>,
+        layout::Key<L>: Columnar,
+        layout::Val<L>: Columnar,
+        layout::Time<L>: Columnar,
+        layout::Diff<L>: Columnar,
     {
-        type Input = Column<((<L::KeyContainer as BatchContainer>::Owned,<L::ValContainer as BatchContainer>::Owned),<L::TimeContainer as BatchContainer>::Owned,<L::DiffContainer as BatchContainer>::Owned)>;
-        type Time = <L::Target as Update>::Time;
+        type Input = Column<((layout::Key<L>,layout::Val<L>),layout::Time<L>,layout::Diff<L>)>;
+        type Time = layout::Time<L>;
         type Output = OrdValBatch<L>;
 
         fn with_capacity(keys: usize, vals: usize, upds: usize) -> Self {
-            // We don't introduce zero offsets as they will be introduced by the first `push` call.
             Self {
                 result: OrdValStorage {
                     keys: L::KeyContainer::with_capacity(keys),
-                    keys_offs: L::OffsetContainer::with_capacity(keys + 1),
-                    vals: L::ValContainer::with_capacity(vals),
-                    vals_offs: L::OffsetContainer::with_capacity(vals + 1),
-                    times: L::TimeContainer::with_capacity(upds),
-                    diffs: L::DiffContainer::with_capacity(upds),
+                    vals: Vals::with_capacity(keys + 1, vals),
+                    upds: Upds::with_capacity(vals + 1, upds),
                 },
-                singleton: None,
-                singletons: 0,
+                staging: UpdsBuilder::default(),
             }
         }
 
@@ -681,47 +638,54 @@ pub mod dd_builder {
             // Owned key and val would need to be members of `self`, as this method can be called multiple times,
             // and we need to correctly cache last for reasons of correctness, not just performance.
 
+            let mut key_con = L::KeyContainer::with_capacity(1);
+            let mut val_con = L::ValContainer::with_capacity(1);
+
             for ((key,val),time,diff) in chunk.drain() {
                 // It would be great to avoid.
-                let key  = <<L::KeyContainer as BatchContainer>::Owned as Columnar>::into_owned(key);
-                let val  = <<L::ValContainer as BatchContainer>::Owned as Columnar>::into_owned(val);
+                let key  = <layout::Key<L> as Columnar>::into_owned(key);
+                let val  = <layout::Val<L> as Columnar>::into_owned(val);
                 // These feel fine (wrt the other versions)
-                let time = <<L::TimeContainer as BatchContainer>::Owned as Columnar>::into_owned(time);
-                let diff = <<L::DiffContainer as BatchContainer>::Owned as Columnar>::into_owned(diff);
+                let time = <layout::Time<L> as Columnar>::into_owned(time);
+                let diff = <layout::Diff<L> as Columnar>::into_owned(diff);
 
+                key_con.clear(); key_con.push_own(&key);
+                val_con.clear(); val_con.push_own(&val);
+
+                // Pre-load the first update.
+                if self.result.keys.is_empty() {
+                    self.result.vals.vals.push_own(&val);
+                    self.result.keys.push_own(&key);
+                    self.staging.push(time, diff);
+                }
                 // Perhaps this is a continuation of an already received key.
-                if self.result.keys.last().map(|k| <<L::KeyContainer as BatchContainer>::ReadItem<'_> as IntoOwned>::borrow_as(&key).eq(&k)).unwrap_or(false) {
+                else if self.result.keys.last() == key_con.get(0) {
                     // Perhaps this is a continuation of an already received value.
-                    if self.result.vals.last().map(|v| <<L::ValContainer as BatchContainer>::ReadItem<'_> as IntoOwned>::borrow_as(&val).eq(&v)).unwrap_or(false) {
-                        self.push_update(time, diff);
+                    if self.result.vals.vals.last() == val_con.get(0) {
+                        self.staging.push(time, diff);
                     } else {
                         // New value; complete representation of prior value.
-                        self.result.vals_offs.push(self.result.times.len());
-                        if self.singleton.take().is_some() { self.singletons += 1; }
-                        self.push_update(time, diff);
-                        self.result.vals.push(&val);
+                        self.staging.seal(&mut self.result.upds);
+                        self.staging.push(time, diff);
+                        self.result.vals.vals.push_own(&val);
                     }
                 } else {
                     // New key; complete representation of prior key.
-                    self.result.vals_offs.push(self.result.times.len());
-                    if self.singleton.take().is_some() { self.singletons += 1; }
-                    self.result.keys_offs.push(self.result.vals.len());
-                    self.push_update(time, diff);
-                    self.result.vals.push(&val);
-                    self.result.keys.push(&key);
+                    self.staging.seal(&mut self.result.upds);
+                    self.staging.push(time, diff);
+                    self.result.vals.offs.push_ref(self.result.vals.len());
+                    self.result.vals.vals.push_own(&val);
+                    self.result.keys.push_own(&key);
                 }
             }
         }
 
         #[inline(never)]
         fn done(mut self, description: Description<Self::Time>) -> OrdValBatch<L> {
-            // Record the final offsets
-            self.result.vals_offs.push(self.result.times.len());
-            // Remove any pending singleton, and if it was set increment our count.
-            if self.singleton.take().is_some() { self.singletons += 1; }
-            self.result.keys_offs.push(self.result.vals.len());
+            self.staging.seal(&mut self.result.upds);
+            self.result.vals.offs.push_ref(self.result.vals.len());
             OrdValBatch {
-                updates: self.result.times.len() + self.singletons,
+                updates: self.staging.total(),
                 storage: self.result,
                 description,
             }
@@ -745,75 +709,29 @@ pub mod dd_builder {
         ///
         /// This is public to allow container implementors to set and inspect their container.
         pub result: OrdKeyStorage<L>,
-        singleton: Option<(<L::Target as Update>::Time, <L::Target as Update>::Diff)>,
-        /// Counts the number of singleton optimizations we performed.
-        ///
-        /// This number allows us to correctly gauge the total number of updates reflected in a batch,
-        /// even though `updates.len()` may be much shorter than this amount.
-        singletons: usize,
-    }
-
-    impl<L: Layout> OrdKeyBuilder<L> {
-        /// Pushes a single update, which may set `self.singleton` rather than push.
-        ///
-        /// This operation is meant to be equivalent to `self.results.updates.push((time, diff))`.
-        /// However, for "clever" reasons it does not do this. Instead, it looks for opportunities
-        /// to encode a singleton update with an "absert" update: repeating the most recent offset.
-        /// This otherwise invalid state encodes "look back one element".
-        ///
-        /// When `self.singleton` is `Some`, it means that we have seen one update and it matched the
-        /// previously pushed update exactly. In that case, we do not push the update into `updates`.
-        /// The update tuple is retained in `self.singleton` in case we see another update and need
-        /// to recover the singleton to push it into `updates` to join the second update.
-        fn push_update(&mut self, time: <L::Target as Update>::Time, diff: <L::Target as Update>::Diff) {
-            // If a just-pushed update exactly equals `(time, diff)` we can avoid pushing it.
-            if self.result.times.last().map(|t| t == <<L::TimeContainer as BatchContainer>::ReadItem<'_> as IntoOwned>::borrow_as(&time)) == Some(true) &&
-                self.result.diffs.last().map(|d| d == <<L::DiffContainer as BatchContainer>::ReadItem<'_> as IntoOwned>::borrow_as(&diff)) == Some(true)
-            {
-                assert!(self.singleton.is_none());
-                self.singleton = Some((time, diff));
-            }
-            else {
-                // If we have pushed a single element, we need to copy it out to meet this one.
-                if let Some((time, diff)) = self.singleton.take() {
-                    self.result.times.push(time);
-                    self.result.diffs.push(diff);
-                }
-                self.result.times.push(time);
-                self.result.diffs.push(diff);
-            }
-        }
+        staging: UpdsBuilder<L::TimeContainer, L::DiffContainer>,
     }
 
     // The layout `L` determines the key, val, time, and diff types.
     impl<L> Builder for OrdKeyBuilder<L>
     where
         L: Layout,
-        <L::KeyContainer as BatchContainer>::Owned: Columnar,
-        <L::ValContainer as BatchContainer>::Owned: Columnar,
-        <L::TimeContainer as BatchContainer>::Owned: Columnar,
-        <L::DiffContainer as BatchContainer>::Owned: Columnar,
-    // These two constraints seem .. like we could potentially replace by `Columnar::Ref<'a>`.
-        for<'a> L::KeyContainer: PushInto<&'a <L::KeyContainer as BatchContainer>::Owned>,
-        for<'a> L::ValContainer: PushInto<&'a <L::ValContainer as BatchContainer>::Owned>,
-        for<'a> <L::TimeContainer as BatchContainer>::ReadItem<'a> : IntoOwned<'a, Owned = <L::Target as Update>::Time>,
-        for<'a> <L::DiffContainer as BatchContainer>::ReadItem<'a> : IntoOwned<'a, Owned = <L::Target as Update>::Diff>,
+        layout::Key<L>: Columnar,
+        layout::Val<L>: Columnar,
+        layout::Time<L>: Columnar,
+        layout::Diff<L>: Columnar,
     {
-        type Input = Column<((<L::KeyContainer as BatchContainer>::Owned,<L::ValContainer as BatchContainer>::Owned),<L::TimeContainer as BatchContainer>::Owned,<L::DiffContainer as BatchContainer>::Owned)>;
-        type Time = <L::Target as Update>::Time;
+        type Input = Column<((layout::Key<L>,layout::Val<L>),layout::Time<L>,layout::Diff<L>)>;
+        type Time = layout::Time<L>;
         type Output = OrdKeyBatch<L>;
 
         fn with_capacity(keys: usize, _vals: usize, upds: usize) -> Self {
-            // We don't introduce zero offsets as they will be introduced by the first `push` call.
             Self {
                 result: OrdKeyStorage {
                     keys: L::KeyContainer::with_capacity(keys),
-                    keys_offs: L::OffsetContainer::with_capacity(keys + 1),
-                    times: L::TimeContainer::with_capacity(upds),
-                    diffs: L::DiffContainer::with_capacity(upds),
+                    upds: Upds::with_capacity(keys + 1, upds),
                 },
-                singleton: None,
-                singletons: 0,
+                staging: UpdsBuilder::default(),
             }
         }
 
@@ -827,34 +745,39 @@ pub mod dd_builder {
             // Owned key and val would need to be members of `self`, as this method can be called multiple times,
             // and we need to correctly cache last for reasons of correctness, not just performance.
 
+            let mut key_con = L::KeyContainer::with_capacity(1);
+
             for ((key,_val),time,diff) in chunk.drain() {
                 // It would be great to avoid.
-                let key  = <<L::KeyContainer as BatchContainer>::Owned as Columnar>::into_owned(key);
+                let key  = <layout::Key<L> as Columnar>::into_owned(key);
                 // These feel fine (wrt the other versions)
-                let time = <<L::TimeContainer as BatchContainer>::Owned as Columnar>::into_owned(time);
-                let diff = <<L::DiffContainer as BatchContainer>::Owned as Columnar>::into_owned(diff);
+                let time = <layout::Time<L> as Columnar>::into_owned(time);
+                let diff = <layout::Diff<L> as Columnar>::into_owned(diff);
 
+                key_con.clear(); key_con.push_own(&key);
+
+                // Pre-load the first update.
+                if self.result.keys.is_empty() {
+                    self.result.keys.push_own(&key);
+                    self.staging.push(time, diff);
+                }
                 // Perhaps this is a continuation of an already received key.
-                if self.result.keys.last().map(|k| <<L::KeyContainer as BatchContainer>::ReadItem<'_> as IntoOwned>::borrow_as(&key).eq(&k)).unwrap_or(false) {
-                    self.push_update(time, diff);
+                else if self.result.keys.last() == key_con.get(0) {
+                    self.staging.push(time, diff);
                 } else {
                     // New key; complete representation of prior key.
-                    self.result.keys_offs.push(self.result.times.len());
-                    if self.singleton.take().is_some() { self.singletons += 1; }
-                    self.push_update(time, diff);
-                    self.result.keys.push(&key);
+                    self.staging.seal(&mut self.result.upds);
+                    self.staging.push(time, diff);
+                    self.result.keys.push_own(&key);
                 }
             }
         }
 
         #[inline(never)]
         fn done(mut self, description: Description<Self::Time>) -> OrdKeyBatch<L> {
-            // Record the final offsets
-            self.result.keys_offs.push(self.result.times.len());
-            // Remove any pending singleton, and if it was set increment our count.
-            if self.singleton.take().is_some() { self.singletons += 1; }
+            self.staging.seal(&mut self.result.upds);
             OrdKeyBatch {
-                updates: self.result.times.len() + self.singletons,
+                updates: self.staging.total(),
                 storage: self.result,
                 description,
             }
